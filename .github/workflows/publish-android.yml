@@ -1,0 +1,63 @@
+name: Publish Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: HTTPS URL of the signed EAS APK
+        required: true
+        type: string
+      tag:
+        description: GitHub release tag
+        required: true
+        type: string
+      asset_name:
+        description: Public APK filename
+        required: true
+        type: string
+      release_title:
+        description: Public release title
+        required: true
+        type: string
+      release_notes:
+        description: Public release notes
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download and verify the APK
+        env:
+          ASSET_NAME: ${{ inputs.asset_name }}
+          SOURCE_URL: ${{ inputs.source_url }}
+        run: |
+          set -euo pipefail
+          [[ "$ASSET_NAME" =~ ^[a-zA-Z0-9._-]+$ ]]
+          curl --fail --location --retry 3 --retry-all-errors "$SOURCE_URL" --output "$ASSET_NAME"
+          unzip -tqq "$ASSET_NAME"
+          sha256sum "$ASSET_NAME" > "$ASSET_NAME.sha256"
+
+      - name: Publish the permanent release
+        env:
+          ASSET_NAME: ${{ inputs.asset_name }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          RELEASE_TITLE: ${{ inputs.release_title }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET_NAME" "$ASSET_NAME.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$ASSET_NAME" "$ASSET_NAME.sha256" \
+              --prerelease \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TITLE" \
+              --notes "$RELEASE_NOTES"
+          fi
